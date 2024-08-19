@@ -10,6 +10,7 @@ import fs from 'fs';
 
 const app = express().use(cookieParser());
 app.listen(process.env.PORT ?? 6395);
+console.log(`Listening on port ${process.env.PORT ?? 6395}`);
 const upload = multer({ 
     dest: 'uploads/',
     fileFilter: (req, file, cb) => {

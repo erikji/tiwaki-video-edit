@@ -2,6 +2,7 @@
 */dist
 */build
 server/config
+server/uploads
 */__pycache__
 *.DS_STORE
 */database

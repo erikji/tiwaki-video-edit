@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import bcrypt from "bcrypt";
 import path from "path";
 
-const SALT_ROUNDS = 11; // ~5 hashes/sec
+const SALT_ROUNDS = 10; // ~10 hashes/sec
 
 /**
  * Manage storing of logins through txt files. None of the functions verify if the user is allowed to perform an action

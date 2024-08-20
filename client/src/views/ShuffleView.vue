@@ -27,6 +27,7 @@ const handleUploadExtract = () => {
 
 const extract = async () => {
     try {
+        extractStatus.value = '';
         if (!extractUpload.value || !extractUpload.value.files) throw 'No files uploaded';
         extractStatus.value = 'Uploading file...';
         const uploadResArray = await upload(extractUpload.value.files, extractStatus);
@@ -108,6 +109,7 @@ const shuffleArray = (arr: any[]) => {
 
 const shuffle = async () => {
     try {
+        shuffleStatus.value = '';
         if (!shuffleUpload.value || !shuffleUpload.value.files) throw 'No files uploaded';
         shuffleStatus.value = 'Uploading files...';
         let objectURL: string;
@@ -183,7 +185,7 @@ const upload = async (files: FileList, statusRef: Ref<string>) => {
                 <input type="number" v-model=fpsDenominator min="1" step="1">
                 second{{ fpsDenominator == 1 ? '' : 's' }}
             </label>
-            {{ Math.round((fpsNumerator / fpsDenominator) * 10) / 10 }} FPS
+            ={{ Math.round((fpsNumerator / fpsDenominator) * 10) / 10 }} FPS
             <div class="column radioContainer">
                 <label>
                     <input type="radio" v-model=targetFormat value="image/jpeg">
@@ -199,8 +201,8 @@ const upload = async (files: FileList, statusRef: Ref<string>) => {
                 </label>
             </div>
             <button :disabled="!canSubmitExtract || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=extract>Extract</button>
-            <p v-show="extractStatus">{{ extractStatus }}</p>
-            <p class="error" v-show="extractError">{{ extractError }}</p>
+            <p>{{ extractStatus }}</p>
+            <p class="error">{{ extractError }}</p>
         </div>
         <div class="column">
             <input type="file" webkitdirectory @change=handleUploadShuffle ref="shuffleUpload">
@@ -227,8 +229,8 @@ const upload = async (files: FileList, statusRef: Ref<string>) => {
                 </label>
             </div>
             <button :disabled="!canSubmitShuffle || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=shuffle>Shuffle</button>
-            <p v-show="shuffleStatus">{{ shuffleStatus }}</p>
-            <p class="error" v-show="shuffleError">{{ shuffleError }}</p>
+            <p>{{ shuffleStatus }}</p>
+            <p class="error">{{ shuffleError }}</p>
         </div>
     </div>
 </template>

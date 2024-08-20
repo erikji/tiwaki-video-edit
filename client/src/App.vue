@@ -19,6 +19,7 @@ onMounted(async () => {
   <nav v-if="route.name != 'login'">
     <RouterLink :to="{ name: 'home' }">Home</RouterLink>
     <RouterLink :to="{ name: 'shuffle' }">Extract images/shuffle</RouterLink>
+    <RouterLink :to="{ name: 'trim' }">Trim</RouterLink>
   </nav>
   <RouterView />
 </template>

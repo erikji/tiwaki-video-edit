@@ -1,6 +1,9 @@
 import fs from "fs/promises"
 import bcrypt from "bcrypt";
 import path from "path";
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SALT_ROUNDS = 10; // ~10 hashes/sec
 

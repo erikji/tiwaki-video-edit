@@ -1,118 +1,101 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, type Ref } from 'vue';
 import JSZip from 'jszip';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { toBlobURL, fetchFile } from '@ffmpeg/util';
+import { PromisePool } from '@supercharge/promise-pool';
 
-const canSubmit = ref(false);
+//form controls
+const canSubmitShuffle = ref(false);
+const canSubmitExtract = ref(false);
 const batchSize = ref(100);
+const fpsNumerator = ref(2);
+const fpsDenominator = ref(1);
 const targetFormat = ref('');
-const taskIndex = ref(-1);
-const numTasks = ref(-1);
-const imageZipIndex = ref(-1);
-const imageConvertIndex = ref(-1);
-const numZipImages = ref(-1);
-const numConvertImages = ref(-1);
-const isZipping = ref(false);
-const localError = ref('');
-const serverError = ref('');
 
-const directoryUpload = ref<HTMLInputElement>();
-const handleUpload = (event: Event) => {
-    //directoryUpload.value.files has all files, all directories are recursively expanded!
-    if (directoryUpload.value?.files && directoryUpload.value?.files.length > 0) {
-        canSubmit.value = true;
+//errors
+const extractStatus = ref('');
+const extractError = ref('');
+const shuffleStatus = ref('');
+const shuffleError = ref('');
+
+const extractUpload = ref<HTMLInputElement>();
+const handleUploadExtract = () => {
+    //extractUpload.value.files has all files, all directories are recursively expanded!
+    if (extractUpload.value?.files && extractUpload.value?.files.length > 0) {
+        canSubmitExtract.value = true;
     }
 }
 
-const ffmpeg = new FFmpeg();
-// ffmpeg.on("log", ({ message }) => {
-//     console.log("[ffmpeg]", message);
-// });
-const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-
-const localShuffle = async (event: Event) => {
+const extract = async () => {
     try {
-        localError.value = '';
-        const fileList = directoryUpload.value?.files;
-        if (!fileList) throw 'No files uploaded';
-        const shuffled = shuffleArray(structuredClone(Array.from(fileList))) as File[];
-        const targetExt = targetFormat.value.split('/')[1];
-
-        const tasks: File[][] = [];
-        for (const file of shuffled) {
-            if (tasks.length == 0 || tasks[tasks.length-1].length == batchSize.value) tasks.push([]);
-            tasks[tasks.length-1].push(file);
+        if (!extractUpload.value || !extractUpload.value.files) throw 'No files uploaded';
+        extractStatus.value = 'Uploading file...';
+        const uploadResArray = await upload(extractUpload.value.files, extractStatus);
+        for (const uploadRes of uploadResArray.results) {
+            if (!uploadRes.ok) throw 'Upload error: ' + uploadRes.status + ' ' + uploadRes.statusText;
         }
-        numTasks.value = tasks.length;
-        const zip = new JSZip();
-
-        for (const index in tasks) {
-            const task = tasks[index];
-            taskIndex.value = Number(index)+1;
-            numZipImages.value = task.length;
-            if (targetExt != 'none') {
-                ffmpeg.terminate();
-                await ffmpeg.load({
-                    coreURL: await toBlobURL(`${ffmpegBaseURL}/ffmpeg-core.js`, 'text/javascript'),
-                    wasmURL: await toBlobURL(`${ffmpegBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-                    // workerURL: await toBlobURL(`${ffmpegBaseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
-                });
-            }
-            const loadPromises: Promise<any>[] = [];
-            for (const file of task) {
-                if (file.type != targetFormat.value && targetExt != 'none') {
-                    loadPromises.push(new Promise((resolve, reject) => {
-                        fetchFile(file).then(uint8 => {
-                            ffmpeg.writeFile(file.name, uint8).then(success => {
-                                resolve(success);
-                            })
-                        })
-                    }));
-                }
-            }
-            numConvertImages.value = loadPromises.length;
-            await Promise.all(loadPromises);
-            
-            const runPromises: Promise<any>[] = [];
-            imageConvertIndex.value = 0;
-            for (const file of task) {
-                if (file.type != targetFormat.value && targetExt != 'none') {
-                    const targetFilename = file.name.split('.').slice(0, -1).concat(targetExt).join('.');
-                    await ffmpeg.exec(['-i', file.name, targetFilename]);
-                    const data = ffmpeg.readFile(targetFilename);
-                    imageConvertIndex.value++;
-                    zip.file('task' + (Number(index)+1) + '/' + targetFilename, data);
-                    await ffmpeg.deleteFile(targetFilename);
-                    await ffmpeg.deleteFile(file.name);
-                } else {
-                    zip.file('task' + (Number(index)+1) + '/' + file.name, file.arrayBuffer());
-                }
-                imageZipIndex.value++;
-            }
-            await Promise.all(runPromises);
-
-            [imageZipIndex, imageConvertIndex, numZipImages, numConvertImages].forEach(r => {
-                r.value = -1;
-            });
-        };
-        isZipping.value = true;
-        const zipped = await zip.generateAsync({ type: 'blob' });
-        const objectURL = URL.createObjectURL(zipped);
-        isZipping.value = false;
+        const res = await fetch('api/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fps: fpsNumerator.value / fpsDenominator.value,
+                file: extractUpload.value.files[0].name,
+                mimetype: targetFormat.value
+            })
+        });
+        if (!res.ok) {
+            throw 'Extract error: ' + res.status + ' ' + res.statusText;
+        }
+        extractStatus.value = 'Downloading...';
+        const objectURL = URL.createObjectURL(await res.blob());
         window.open(objectURL);
         console.log(objectURL);
-        taskIndex.value = -1;
-        numTasks.value = -1;
-        isZipping.value = false;
-    } catch (error) {
-        console.error(error);
-        if (typeof error == 'string') {
-            localError.value = error;
-        } else if (error instanceof Error) {
-            localError.value = error.message;
+        extractStatus.value = '';
+        extractUpload.value.files = null;
+    } catch (e) {
+        console.error(e);
+        if (typeof e == 'string') {
+            extractError.value = e;
+        } else if (e instanceof Error) {
+            extractError.value = e.message;
         }
     }
+}
+
+const shuffleUpload = ref<HTMLInputElement>();
+const handleUploadShuffle = () => {
+    //shuffleUpload.value.files has all files, all directories are recursively expanded!
+    if (shuffleUpload.value?.files && shuffleUpload.value?.files.length > 0) {
+        canSubmitShuffle.value = true;
+    }
+}
+
+//only shuffle, no converting which is too slow with ffmpeg.wasm
+const localShuffle = async () => {
+    const shuffled = shuffleArray(structuredClone(Array.from(shuffleUpload.value!.files!))) as File[];
+    const tasks: File[][] = [];
+    for (const file of shuffled) {
+        if (tasks.length == 0 || tasks[tasks.length-1].length == batchSize.value) tasks.push([]);
+        tasks[tasks.length-1].push(file);
+    }
+    const zip = new JSZip();
+
+    for (const index in tasks) {
+        shuffleStatus.value = `Zipping task ${index+1} of ${tasks.length}`;
+        const task = tasks[index];
+        const zipPromises: Promise<any>[] = [];
+        for (const file of task) {
+            zipPromises.push(new Promise((resolve, reject) => {
+                zip.file('task' + (Number(index)+1) + '/' + file.name, file.arrayBuffer());
+                resolve(true);
+            }));
+        }
+        await Promise.all(zipPromises);
+    };
+    shuffleStatus.value = 'Generating download link...';
+    const zipped = await zip.generateAsync({ type: 'blob' });
+    return URL.createObjectURL(zipped);
 }
 
 const shuffleArray = (arr: any[]) => {
@@ -123,48 +106,112 @@ const shuffleArray = (arr: any[]) => {
     return arr;
 }
 
-const shuffle = async (event: Event) => {
+const shuffle = async () => {
     try {
-        if (!directoryUpload.value || !directoryUpload.value.files) throw 'No files uploaded';
-        const inputs = new FormData();
-        inputs.set('mimetype', targetFormat.value);
-        inputs.set('batchSize', batchSize.value.toString());
-        for (const file of directoryUpload.value.files) {
-            inputs.set(file.name, file);
+        if (!shuffleUpload.value || !shuffleUpload.value.files) throw 'No files uploaded';
+        shuffleStatus.value = 'Uploading files...';
+        let objectURL: string;
+        if (targetFormat.value == 'none/none') {
+            objectURL = await localShuffle();
+        } else {
+            const uploadResArray = await upload(shuffleUpload.value.files, shuffleStatus);
+            for (const uploadRes of uploadResArray.results) {
+                if (!uploadRes.ok) throw 'Upload error: ' + uploadRes.status + ' ' + uploadRes.statusText;
+            }
+            shuffleStatus.value = 'Converting and shuffling...';
+            const res = await fetch('api/shuffle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    mimetype: targetFormat.value,
+                    batchSize: batchSize.value,
+                    files: Array.from(shuffleUpload.value.files).filter(f => f.type.startsWith('image')).map(file => file.webkitRelativePath)
+                })
+            });
+            if (!res.ok) {
+                throw 'Shuffle error: ' + res.status + ' ' + res.statusText;
+            }
+            shuffleStatus.value = 'Downloading... (this could take a long time)';
+            objectURL = URL.createObjectURL(await res.blob());
         }
-        const res = await fetch('api/shuffle', {
-            method: 'POST',
-            body: inputs 
-        });
-        if (!res.ok) {
-            serverError.value = res.status + ' ' + res.statusText;
-        }
-        const objectURL = URL.createObjectURL(await res.blob());
         window.open(objectURL);
         console.log(objectURL);
-    } catch (error) {
-        console.error(error);
-        if (typeof error == 'string') {
-            serverError.value = error;
-        } else if (error instanceof Error) {
-            serverError.value = error.message;
+        shuffleStatus.value = '';
+        shuffleUpload.value.files = null;
+    } catch (e) {
+        console.error(e);
+        if (typeof e == 'string') {
+            shuffleError.value = e;
+        } else if (e instanceof Error) {
+            shuffleError.value = e.message;
         }
     }
+}
+
+const upload = async (files: FileList, statusRef: Ref<string>) => {
+    const requests: FormData[] = [];
+    const requestSize = 50;
+    for (const file of files) {
+        if (!file.type.startsWith('video') && !file.type.startsWith('image')) continue;
+        if (requests.length == 0 || Array.from(requests[requests.length-1].entries()).length >= requestSize) requests.push(new FormData());
+        requests[requests.length-1].set(file.webkitRelativePath == '' ? file.name : file.webkitRelativePath, file);
+    }
+    console.log(requests);
+    return new PromisePool(requests).withConcurrency(10).onTaskFinished((request, pool) => {
+        statusRef.value = 'Uploading files ' + Math.round(pool.processedPercentage() * 10) / 10 + '%';
+    }).process(async (request) => {
+        return await fetch('api/upload', {
+            method: 'POST',
+            body: request
+        });
+    });
 }
 </script>
 
 <template>
     <div class="centered">
         <div class="column">
-            <input type="file" webkitdirectory @change=handleUpload ref="directoryUpload">
+            <input type="file" @change=handleUploadExtract ref="extractUpload" accept="video/*">
+            <label>
+                <input type="number" v-model=fpsNumerator min="1" step="1">
+                image{{ fpsNumerator == 1 ? '' : 's' }}
+            </label>
+            per
+            <label>
+                <input type="number" v-model=fpsDenominator min="1" step="1">
+                second{{ fpsDenominator == 1 ? '' : 's' }}
+            </label>
+            {{ Math.round((fpsNumerator / fpsDenominator) * 10) / 10 }} FPS
+            <div class="column radioContainer">
+                <label>
+                    <input type="radio" v-model=targetFormat value="image/jpeg">
+                    JPEG
+                </label>
+                <label>
+                    <input type="radio" v-model=targetFormat value="image/png">
+                    PNG
+                </label>
+                <label>
+                    <input type="radio" v-model=targetFormat value="image/webp">
+                    WEBP
+                </label>
+            </div>
+            <button :disabled="!canSubmitExtract || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=extract>Extract</button>
+            <p v-show="extractStatus">{{ extractStatus }}</p>
+            <p class="error" v-show="extractError">{{ extractError }}</p>
+        </div>
+        <div class="column">
+            <input type="file" webkitdirectory @change=handleUploadShuffle ref="shuffleUpload">
             <label>
                 Batch size
                 <input type="number" v-model=batchSize min="1" step="1">
             </label>
-            <div>
+            <div class="column radioContainer">
                 <label>
                     <input type="radio" v-model=targetFormat value="none/none">
-                    No convert
+                    No convert (local)
                 </label>
                 <label>
                     <input type="radio" v-model=targetFormat value="image/jpeg">
@@ -179,14 +226,9 @@ const shuffle = async (event: Event) => {
                     WEBP
                 </label>
             </div>
-            <button :disabled="!canSubmit || !['image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=shuffle>Shuffle on server</button>
-            <button :disabled="!canSubmit || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=localShuffle>Shuffle locally</button>
-            <p v-show="taskIndex >= 0">Running task {{ taskIndex }} of {{ numTasks }}</p>
-            <p v-show="imageZipIndex >= 0">Zipping image {{ imageZipIndex }} of {{ numZipImages }}</p>
-            <p v-show="imageConvertIndex >= 0">Converting image {{ imageConvertIndex }} of {{ numConvertImages }}</p>
-            <p v-show="isZipping">Zipping</p>
-            <p class="error" v-show="localError">Local error: {{ localError }}</p>
-            <p class="error" v-show="serverError">Server error: {{ serverError }}</p>
+            <button :disabled="!canSubmitShuffle || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=shuffle>Shuffle</button>
+            <p v-show="shuffleStatus">{{ shuffleStatus }}</p>
+            <p class="error" v-show="shuffleError">{{ shuffleError }}</p>
         </div>
     </div>
 </template>
@@ -198,5 +240,13 @@ p {
 
 .error {
     color: red;
+}
+
+.radioContainer {
+    align-items: start;
+}
+
+input[type=number] {
+    width: 80px;
 }
 </style>

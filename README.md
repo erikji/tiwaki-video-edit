@@ -1,7 +1,9 @@
 Create/modify the file `server/config/.env` and specify the following variables:
 * `PORT` which changes the port the server is run on (and which port the client tries to connect to). It defaults to `6395`.
 
-To specify logins, create/modify the file `server/database/logins.txt`, and enter username/bcrypt hashed password pairs in the format `<username>\n<password_hash>\n`. You can use https://bcrypt-generator.com/ to generate the hashed password from plaintext (recommended strength: 10).
+To specify logins, create/modify the file `server/database/logins.txt`, and enter username/bcrypt hashed password pairs in the format `<username>\n<password_hash>\n`. You can use https://bcrypt-generator.com/ to generate the hashed password from plaintext (recommended rounds: 10).
+
+Note that downloading zipped files (especially if converting to png) will take a long time, please be patient.
 
 ## Building client
 

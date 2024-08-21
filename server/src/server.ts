@@ -88,7 +88,7 @@ app.post('/api/extract', loginCheck, express.json(), async (req, res) => {
         const zip = archiver('zip');
         let index = 0;
         ffmpeg(path.resolve(__dirname, '..', uploadDir, username, req.body.file)).fpsOutput(req.body.fps).videoCodec(targetCodec).format('image2pipe').outputOptions(['-update', '1']).pipe().on('data', data => {
-            console.log(data);
+            //note: 8192 byte buffer bug occurs on Mac - please check on linux etc.
             index++;
             zip.append(data, { name: 'img' + index + '.' + targetExt });
         }).on('end', async () => {

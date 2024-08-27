@@ -19,7 +19,7 @@ export class Database {
 
     async readLogins() {
         const data = await fs.readFile(path.join(__dirname, '../database/logins.txt'));
-        const userPass = data.toString().split('\n');
+        const userPass = data.toString().trim().split('\n');
         if (userPass.length % 2 != 0) throw new Error('Malformed logins txt');
         for (let index = 0; index < userPass.length; index += 2) {
             this.#logins.set(userPass[0], userPass[1]);

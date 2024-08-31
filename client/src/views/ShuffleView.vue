@@ -1,73 +1,24 @@
 <script setup lang="ts">
-import { ref, type Ref } from 'vue';
+import { ref } from 'vue';
 import JSZip from 'jszip';
-import { PromisePool } from '@supercharge/promise-pool';
-import { downloadBlob } from '@/scripts/DownloadManager';
+import { downloadBlob, upload } from '@/scripts/FileManager';
+import ProcessStatus from '@/components/ProcessStatus.vue';
 
 //form controls
-const canSubmitShuffle = ref(false);
-const canSubmitExtract = ref(false);
+const canSubmit = ref(false);
 const batchSize = ref(100);
-const fpsNumerator = ref(2);
-const fpsDenominator = ref(1);
 const targetFormat = ref('');
 
 //errors
-const extractStatus = ref('');
-const extractError = ref('');
-const shuffleStatus = ref('');
-const shuffleError = ref('');
-
-const extractUpload = ref<HTMLInputElement>();
-const handleUploadExtract = () => {
-    //extractUpload.value.files has all files, all directories are recursively expanded!
-    if (extractUpload.value?.files && extractUpload.value?.files.length > 0) {
-        canSubmitExtract.value = true;
-    }
-}
-
-const extract = async () => {
-    try {
-        extractStatus.value = '';
-        if (!extractUpload.value || !extractUpload.value.files) throw 'No files uploaded';
-        extractStatus.value = 'Uploading file...';
-        const uploadResArray = await upload(extractUpload.value.files, extractStatus);
-        for (const uploadRes of uploadResArray.results) {
-            if (!uploadRes.ok) throw 'Upload error: ' + uploadRes.status + ' ' + uploadRes.statusText;
-        }
-        const res = await fetch('api/extract', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                fps: fpsNumerator.value / fpsDenominator.value,
-                file: extractUpload.value.files[0].name,
-                mimetype: targetFormat.value
-            })
-        });
-        if (!res.ok) {
-            throw 'Extract error: ' + res.status + ' ' + res.statusText;
-        }
-        extractStatus.value = 'Downloading...';
-        downloadBlob(await res.blob(), 'extract.zip');
-        extractStatus.value = '';
-        extractUpload.value.files = null;
-    } catch (e) {
-        console.error(e);
-        if (typeof e == 'string') {
-            extractError.value = e;
-        } else if (e instanceof Error) {
-            extractError.value = e.message;
-        }
-    }
-}
+const status = ref('');
+const error = ref('');
+const percentage = ref<number | undefined>();
 
 const shuffleUpload = ref<HTMLInputElement>();
-const handleUploadShuffle = () => {
+const handleUpload = () => {
     //shuffleUpload.value.files has all files, all directories are recursively expanded!
     if (shuffleUpload.value?.files && shuffleUpload.value?.files.length > 0) {
-        canSubmitShuffle.value = true;
+        canSubmit.value = true;
     }
 }
 
@@ -82,7 +33,7 @@ const localShuffle = async () => {
     const zip = new JSZip();
 
     for (const index in tasks) {
-        shuffleStatus.value = `Zipping task ${index+1} of ${tasks.length}`;
+        status.value = `Zipping task ${index+1} of ${tasks.length}`;
         const task = tasks[index];
         const zipPromises: Promise<any>[] = [];
         for (const file of task) {
@@ -93,7 +44,7 @@ const localShuffle = async () => {
         }
         await Promise.all(zipPromises);
     };
-    shuffleStatus.value = 'Generating download link...';
+    status.value = 'Downloading';
     return zip.generateAsync({ type: 'blob' });
 }
 
@@ -107,17 +58,20 @@ const shuffleArray = (arr: any[]) => {
 
 const shuffle = async () => {
     try {
-        shuffleStatus.value = '';
+        status.value = '';
+        error.value = '';
+        percentage.value = undefined;
         if (!shuffleUpload.value || !shuffleUpload.value.files) throw 'No files uploaded';
-        shuffleStatus.value = 'Uploading files...';
+        status.value = 'Uploading files';
         if (targetFormat.value == 'none/none') {
             downloadBlob(await localShuffle());
         } else {
-            const uploadResArray = await upload(shuffleUpload.value.files, shuffleStatus);
+            const uploadResArray = await upload(shuffleUpload.value.files, percentage);
+            percentage.value = undefined;
             for (const uploadRes of uploadResArray.results) {
                 if (!uploadRes.ok) throw 'Upload error: ' + uploadRes.status + ' ' + uploadRes.statusText;
             }
-            shuffleStatus.value = 'Converting and shuffling...';
+            status.value = 'Converting and shuffling';
             const res = await fetch('api/shuffle', {
                 method: 'POST',
                 headers: {
@@ -132,75 +86,26 @@ const shuffle = async () => {
             if (!res.ok) {
                 throw 'Shuffle error: ' + res.status + ' ' + res.statusText;
             }
-            shuffleStatus.value = 'Downloading... (this could take a long time)';
+            status.value = 'Downloading';
             downloadBlob(await res.blob(), 'shuffle.zip');
         }
-        shuffleStatus.value = '';
+        status.value = '';
         shuffleUpload.value.files = null;
     } catch (e) {
         console.error(e);
         if (typeof e == 'string') {
-            shuffleError.value = e;
+            error.value = e;
         } else if (e instanceof Error) {
-            shuffleError.value = e.message;
+            error.value = e.message;
         }
     }
-}
-
-const upload = async (files: FileList, statusRef: Ref<string>) => {
-    const requests: FormData[] = [];
-    const requestSize = 50;
-    for (const file of files) {
-        if (!file.type.startsWith('video') && !file.type.startsWith('image')) continue;
-        if (requests.length == 0 || Array.from(requests[requests.length-1].entries()).length >= requestSize) requests.push(new FormData());
-        requests[requests.length-1].set(file.webkitRelativePath == '' ? file.name : file.webkitRelativePath, file);
-    }
-    console.log(requests);
-    return new PromisePool(requests).withConcurrency(10).onTaskFinished((request, pool) => {
-        statusRef.value = 'Uploading files ' + Math.round(pool.processedPercentage() * 10) / 10 + '%';
-    }).process(async (request) => {
-        return await fetch('api/upload', {
-            method: 'POST',
-            body: request
-        });
-    });
 }
 </script>
 
 <template>
     <div class="centered">
         <div class="column">
-            <input type="file" @change=handleUploadExtract ref="extractUpload" accept="video/*">
-            <label>
-                <input type="number" v-model=fpsNumerator min="1" step="1">
-                image{{ fpsNumerator == 1 ? '' : 's' }}
-            </label>
-            per
-            <label>
-                <input type="number" v-model=fpsDenominator min="1" step="1">
-                second{{ fpsDenominator == 1 ? '' : 's' }}
-            </label>
-            ={{ Math.round((fpsNumerator / fpsDenominator) * 10) / 10 }} FPS
-            <div class="column radioContainer">
-                <label>
-                    <input type="radio" v-model=targetFormat value="image/jpeg">
-                    JPEG
-                </label>
-                <label>
-                    <input type="radio" v-model=targetFormat value="image/png">
-                    PNG
-                </label>
-                <label>
-                    <input type="radio" v-model=targetFormat value="image/webp">
-                    WEBP
-                </label>
-            </div>
-            <button :disabled="!canSubmitExtract || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=extract>Extract</button>
-            <p>{{ extractStatus }}</p>
-            <p class="error">{{ extractError }}</p>
-        </div>
-        <div class="column">
-            <input type="file" webkitdirectory @change=handleUploadShuffle ref="shuffleUpload">
+            <input type="file" webkitdirectory @change=handleUpload ref="shuffleUpload">
             <label>
                 Batch size
                 <input type="number" v-model=batchSize min="1" step="1">
@@ -208,7 +113,7 @@ const upload = async (files: FileList, statusRef: Ref<string>) => {
             <div class="column radioContainer">
                 <label>
                     <input type="radio" v-model=targetFormat value="none/none">
-                    No convert (local)
+                    No convert
                 </label>
                 <label>
                     <input type="radio" v-model=targetFormat value="image/jpeg">
@@ -223,27 +128,33 @@ const upload = async (files: FileList, statusRef: Ref<string>) => {
                     WEBP
                 </label>
             </div>
-            <button :disabled="!canSubmitShuffle || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=shuffle>Shuffle</button>
-            <p>{{ shuffleStatus }}</p>
-            <p class="error">{{ shuffleError }}</p>
+            <button :disabled="!canSubmit || !['none/none', 'image/jpeg', 'image/png', 'image/webp'].includes(targetFormat) || !Number.isInteger(batchSize) || batchSize < 1" @click=shuffle>SHUFFLE</button>
+            <ProcessStatus :status :error :percentage></ProcessStatus>
+            <div class="instructions">
+                Instructions:<br>
+                1. Upload a directory<br>
+                2. Set batch size, how many images to put in each sub-folder<br>
+                3. Set image format to convert all images to, or leave as original format<br>
+                4. Press SHUFFLE. May take a long time to upload/download files<br><br>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-p {
-    margin: 0;
-}
-
-.error {
-    color: red;
-}
-
 .radioContainer {
     align-items: start;
 }
 
 input[type=number] {
     width: 80px;
+}
+
+.instructions {
+    text-align: left;
+}
+
+.instructions p {
+    margin: 0 0 0 4px;
 }
 </style>

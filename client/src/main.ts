@@ -8,6 +8,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from './views/HomeView.vue'
 import ShuffleView from './views/ShuffleView.vue'
 import TrimView from './views/TrimView.vue'
+import ExtractView from './views/ExtractView.vue'
 
 const app = createApp(App)
 
@@ -25,6 +26,11 @@ const router = createRouter({
         path: '/shuffle',
         name: 'shuffle',
         component: ShuffleView
+      },
+      {
+        path: '/extract',
+        name: 'extract',
+        component: ExtractView
       },
       {
         path: '/trim',

@@ -135,7 +135,7 @@ app.post('/api/shuffle', loginCheck, express.json(), async (req, res) => {
         const start = Date.now();
         const targetExt = mime.getExtension(req.body.mimetype)!;
         const targetCodec = targetExt == 'webp' ? 'libwebp' : targetExt == 'png' ? 'png' : targetExt == 'jpeg' ? 'mjpeg' : 'png';
-        const files: TaskFile[] = shuffleArray(req.body.files).map((file, index) => ({ task: Math.floor(Number(index) / req.body.batchSize), filename: file, targetFilename: file.split('/').slice(-1)[0] }));
+        const files: TaskFile[] = shuffleArray(req.body.files).map((file, index) => ({ task: Math.floor(Number(index) / req.body.batchSize), filename: file, targetFilename: file.split('/').slice(-1)[0].split('.')[0] + '.' + targetExt }));
         const zip = archiver('zip');
         await PromisePool.for(files).withConcurrency(10).process(async (file, fileIndex) => {
             if (mime.getType(file.filename) != req.body.mimetype) {

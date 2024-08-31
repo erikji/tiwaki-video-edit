@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { downloadBlob } from '@/scripts/DownloadManager';
+import ProcessStatus from '@/components/ProcessStatus.vue';
+import { downloadBlob } from '@/scripts/FileManager';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL, fetchFile } from '@ffmpeg/util';
 import { ref } from 'vue';
@@ -12,13 +13,18 @@ const videoType = ref('');
 const videoZoom = ref(1);
 const videoX = ref(0);
 const videoY = ref(0);
+const mouseDown = ref(false);
+let lastMouseX = 0;
+let lastMouseY = 0;
 const videoPaused = ref(true);
 const videoTime = ref(0);
 const videoLength = ref(0);
 const trimStart = ref(0);
 const trimEnd = ref(0);
+
 const status = ref('');
 const error = ref('');
+const percentage = ref<number | undefined>();
 
 const ffmpeg = new FFmpeg();
 const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
@@ -27,6 +33,7 @@ const trim = async () => {
     try {
         status.value = '';
         error.value = '';
+        percentage.value = undefined;
         if (!upload.value || !upload.value.files) return;
         if (!ffmpeg.loaded) {
             await ffmpeg.load({
@@ -46,12 +53,13 @@ const trim = async () => {
         if (trimEnd.value >= 0) {
             ops.push('-to', trimEnd.value.toString());
         }
-        status.value = 'Trimming...';
+        status.value = 'Trimming';
         ffmpeg.on('progress', (event) => {
-            status.value = `Trimming... ${event.progress*100}%`;
+            percentage.value = event.progress*100;
         })
         await ffmpeg.exec(['-i', file.name].concat(ops, outputFilename));
-        status.value = 'Generating download link...';
+        percentage.value = undefined;
+        status.value = 'Downloading';
         downloadBlob(new Blob([await ffmpeg.readFile(outputFilename)]), outputFilename);
         status.value = '';
     } catch (e) {
@@ -64,8 +72,8 @@ const trim = async () => {
     }
 }
 
+// zoom to location of mouse
 const scrollZoom = (e: WheelEvent) => {
-    console.log(e);
     e.preventDefault();
     const rect = stage.value?.getBoundingClientRect();
     if (!rect) return;
@@ -76,6 +84,28 @@ const scrollZoom = (e: WheelEvent) => {
     videoX.value = ((videoX.value - offsetX) / zoomFactor) + offsetX;
     videoY.value = ((videoY.value - offsetY) / zoomFactor) + offsetY;
     videoZoom.value *= zoomFactor;
+}
+
+// pan based on mouse
+const dragPan = (e: MouseEvent) => {
+    e.preventDefault();
+    const rect = stage.value?.getBoundingClientRect();
+    if (!rect) return;
+    if (mouseDown.value) {
+        videoX.value -= (e.pageX - lastMouseX) / videoZoom.value;
+        videoY.value -= (e.pageY - lastMouseY) / videoZoom.value;
+    }
+    lastMouseX = e.pageX;
+    lastMouseY = e.pageY;
+}
+
+// zoom to center
+const zoom = (factor: number) => {
+    const rect = stage.value?.getBoundingClientRect();
+    if (!rect) return;
+    videoX.value += rect.width / videoZoom.value * (1 - 1 / factor) / 2;
+    videoY.value += rect.height / videoZoom.value * (1 - 1 / factor) / 2;
+    videoZoom.value *= factor;
 }
 
 //reactivity doesn't work if you put this in v-bind css
@@ -107,7 +137,7 @@ const handleUpload = async () => {
         <div class="column">
             <input type="file" @change=handleUpload ref="upload" accept="video/*">
             <div class="centered row">
-                <div class="stage" ref="stage" @wheel=scrollZoom @click="videoSource?.paused ? videoSource?.play() : videoSource?.pause()">
+                <div class="stage" ref="stage" @wheel=scrollZoom @mousedown="mouseDown = true" @mouseup ="mouseDown = false" @mouseleave="mouseDown = false" @mousemove="dragPan">
                     <video disablePictureInPicture muted ref="videoSource" :src="videoURL" :type="videoType" @loadedmetadata=loadMetadata 
                     @play="() => videoPaused = false"
                     @pause="() => videoPaused = true"
@@ -144,6 +174,12 @@ const handleUpload = async () => {
                     +5
                 </button>
                 <input type="range" size="1" min="0" :max="videoLength" @change="() => videoSource!.currentTime = videoTime" v-model="videoTime" class="seeker">
+                <button @click="() => {
+                    zoom(1.1);
+                }">+</button>
+                <button @click="() => {
+                    zoom(1 / 1.1);
+                }">-</button>
                 <button :disabled="videoZoom == 1 && videoX == 0 && videoY == 0"
                 @click="() => {
                     videoZoom = 1;
@@ -151,17 +187,63 @@ const handleUpload = async () => {
                     videoY = 0;
                 }"><img src="../assets/zoom.svg"></button>
             </div>
-            <p>{{ status }}</p>
-            <p class="error">{{ error }}</p>
+            <ProcessStatus :status :error :percentage></ProcessStatus>
+            <div class="instructions">
+                Instructions:<br>
+                1. Upload a video<br>
+                2. Set start time and end time. Both are in seconds. Select -1 for beginning/end of video<br>
+                3. Press TRIM. Video will download soon, be patient<br><br>
+                Controls:<br>
+                <div class="row">
+                    <button @click="() => videoSource!.currentTime -= 5">
+                        -5
+                    </button>
+                    <p>Go back 5 seconds</p>
+                </div>
+                <div class="row">
+                    <button v-show="videoPaused" @click="videoSource?.play()">
+                        <img src="../assets/play.svg">
+                    </button>
+                    <button v-show="!videoPaused" @click="videoSource?.pause()">
+                        <img src="../assets/pause.svg">
+                    </button>
+                    <p>{{ videoPaused ? 'Play' : 'Pause' }}</p>
+                </div>
+                <div class="row">
+                    <button @click="() => videoSource!.currentTime += 5">
+                        +5
+                    </button>
+                    <p>Go forward 5 seconds</p>
+                </div>
+                <div class="row">
+                    <button @click="() => {
+                        zoom(1.1);
+                    }">+</button>
+                    <p>Zoom in</p>
+                </div>
+                <div class="row">
+                    <button @click="() => {
+                        zoom(1 / 1.1);
+                    }">-</button>
+                    <p>Zoom out</p>
+                </div>
+                <div class="row">
+                    <button :disabled="videoZoom == 1 && videoX == 0 && videoY == 0"
+                    @click="() => {
+                        videoZoom = 1;
+                        videoX = 0;
+                        videoY = 0;
+                    }"><img src="../assets/zoom.svg"></button>
+                    <p>Reset zoom</p>
+                </div>
+                You can also zoom by scrolling on the video window<br>
+                You can also pan by dragging on the video window
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.error {
-    color: red;
-}
-
 .videoControls {
     margin-top: 4px;
     width: 60vw;
@@ -205,11 +287,24 @@ button:disabled {
 .stage {
     overflow: hidden;
     background-color: lightgray;
+    cursor: grab;
+}
+
+.stage:active {
+    cursor: grabbing;
 }
 
 video {
     width: 100%;
     transform: scale(v-bind("videoZoom")) translate(v-bind("-videoX + 'px'"), v-bind("-videoY + 'px'"));
     transform-origin: 0px 0px;
+}
+
+.instructions {
+    text-align: left;
+}
+
+.instructions p {
+    margin: 0 0 0 4px;
 }
 </style>

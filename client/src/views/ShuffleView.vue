@@ -2,6 +2,7 @@
 import { ref, type Ref } from 'vue';
 import JSZip from 'jszip';
 import { PromisePool } from '@supercharge/promise-pool';
+import { downloadBlob } from '@/scripts/DownloadManager';
 
 //form controls
 const canSubmitShuffle = ref(false);
@@ -49,9 +50,7 @@ const extract = async () => {
             throw 'Extract error: ' + res.status + ' ' + res.statusText;
         }
         extractStatus.value = 'Downloading...';
-        const objectURL = URL.createObjectURL(await res.blob());
-        window.open(objectURL);
-        console.log(objectURL);
+        downloadBlob(await res.blob(), 'extract.zip');
         extractStatus.value = '';
         extractUpload.value.files = null;
     } catch (e) {
@@ -95,8 +94,7 @@ const localShuffle = async () => {
         await Promise.all(zipPromises);
     };
     shuffleStatus.value = 'Generating download link...';
-    const zipped = await zip.generateAsync({ type: 'blob' });
-    return URL.createObjectURL(zipped);
+    return zip.generateAsync({ type: 'blob' });
 }
 
 const shuffleArray = (arr: any[]) => {
@@ -112,9 +110,8 @@ const shuffle = async () => {
         shuffleStatus.value = '';
         if (!shuffleUpload.value || !shuffleUpload.value.files) throw 'No files uploaded';
         shuffleStatus.value = 'Uploading files...';
-        let objectURL: string;
         if (targetFormat.value == 'none/none') {
-            objectURL = await localShuffle();
+            downloadBlob(await localShuffle());
         } else {
             const uploadResArray = await upload(shuffleUpload.value.files, shuffleStatus);
             for (const uploadRes of uploadResArray.results) {
@@ -136,10 +133,8 @@ const shuffle = async () => {
                 throw 'Shuffle error: ' + res.status + ' ' + res.statusText;
             }
             shuffleStatus.value = 'Downloading... (this could take a long time)';
-            objectURL = URL.createObjectURL(await res.blob());
+            downloadBlob(await res.blob(), 'shuffle.zip');
         }
-        window.open(objectURL);
-        console.log(objectURL);
         shuffleStatus.value = '';
         shuffleUpload.value.files = null;
     } catch (e) {

@@ -3,5 +3,5 @@
 
 <template>
   <br>
-  Welcome
+  Click the menu buttons
 </template>

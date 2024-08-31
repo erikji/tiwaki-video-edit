@@ -66,6 +66,12 @@ app.post('/api/login', express.urlencoded({ extended: false }), async (req, res)
     }
 });
 
+app.post('/api/logout', loginCheck, async (req, res) => {
+    loginManager.delete(req.cookies.token);
+    res.clearCookie('token');
+    res.redirect('/login');
+});
+
 app.get('/api/check', loginCheck);
 
 app.post('/api/upload', loginCheck, upload.any(), (req, res) => {

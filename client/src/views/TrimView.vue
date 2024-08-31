@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { downloadBlob } from '@/scripts/DownloadManager';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL, fetchFile } from '@ffmpeg/util';
 import { ref } from 'vue';
@@ -51,7 +52,7 @@ const trim = async () => {
         })
         await ffmpeg.exec(['-i', file.name].concat(ops, outputFilename));
         status.value = 'Generating download link...';
-        window.open(URL.createObjectURL(new Blob([await ffmpeg.readFile(outputFilename)])));
+        downloadBlob(new Blob([await ffmpeg.readFile(outputFilename)]), outputFilename);
         status.value = '';
     } catch (e) {
         console.error(e);
@@ -114,13 +115,13 @@ const handleUpload = async () => {
                     >Video playback disabled</video>
                 </div>
                 <div class="column">
-                    Start time:
+                    Start time (seconds):
                     <div class="row">
                         <input type="number" min="-1" v-model="trimStart">
                         <button @click="() => trimStart = Math.floor(videoTime)">Set to now</button>
                         <button @click="() => trimStart = -1">Set to beginning</button>
                     </div>
-                    End time:
+                    End time (seconds):
                     <div class="row">
                         <input type="number" min="-1" v-model="trimEnd">
                         <button @click="() => trimEnd = Math.ceil(videoTime)">Set to now</button>

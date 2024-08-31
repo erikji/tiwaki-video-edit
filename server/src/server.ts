@@ -15,7 +15,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const uploadDir = 'uploads/';
-const absoluteUploadDir = path.resolve(__dirname, '..', uploadDir);
 const app = express().use(cookieParser());
 app.listen(process.env.PORT ?? 6395);
 console.log(`Listening on port ${process.env.PORT ?? 6395}`);
@@ -43,7 +42,12 @@ const upload = multer({
 const loginManager = new LoginManager();
 const database = new Database();
 const loginCheck = (req, res, next) => {
-    if (!req.cookies.token || !loginManager.check(req.cookies.token)) {
+    if (!req.cookies.token) {
+        res.sendStatus(401);
+        return;
+    }
+    req.username = loginManager.check(req.cookies.token);
+    if (!req.username) {
         res.sendStatus(401);
         return;
     }
@@ -75,37 +79,35 @@ app.post('/api/logout', loginCheck, async (req, res) => {
 app.get('/api/check', loginCheck);
 
 app.post('/api/upload', loginCheck, upload.any(), (req, res) => {
-    const username = loginManager.check(req.cookies.token)!;
-    console.log(`[${username}] /upload request`);
+    console.log(`[${req.username}] /upload request`);
     res.sendStatus(201);
 });
 
 app.post('/api/extract', loginCheck, express.json(), async (req, res) => {
-    const username = loginManager.check(req.cookies.token)!;
-    if (req.body == null || typeof req.body.file != 'string' || !fs.existsSync(path.resolve(__dirname, '..', uploadDir, username, req.body.file)) || !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, username, req.body.file)))?.mime.startsWith('video') || !['image/jpeg', 'image/png', 'image/webp'].includes(req.body.mimetype) || typeof req.body.fps != 'number' || req.body.fps <= 0) {
+    if (req.body == null || typeof req.body.file != 'string' || !req.username || !fs.existsSync(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)) || !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)))?.mime.startsWith('video') || !['image/jpeg', 'image/png', 'image/webp'].includes(req.body.mimetype) || typeof req.body.fps != 'number' || req.body.fps <= 0) {
         res.sendStatus(400);
         return;
     }
-    console.log(`[${username}] /extract request`);
+    console.log(`[${req.username}] /extract request`);
     try {
         const start = Date.now();
         const targetExt = mime.getExtension(req.body.mimetype)!;
         const targetCodec = targetExt == 'webp' ? 'libwebp' : targetExt == 'png' ? 'png' : targetExt == 'jpeg' ? 'mjpeg' : 'png';
         const zip = archiver('zip');
         let index = 0;
-        ffmpeg(path.resolve(__dirname, '..', uploadDir, username, req.body.file)).fpsOutput(req.body.fps).videoCodec(targetCodec).format('image2pipe').outputOptions(['-update', '1']).pipe().on('data', data => {
+        ffmpeg(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)).fpsOutput(req.body.fps).videoCodec(targetCodec).format('image2pipe').outputOptions(['-update', '1']).pipe().on('data', data => {
             //note: 8192 byte buffer bug occurs on Mac - please check on linux etc.
             index++;
             zip.append(data, { name: 'img' + index + '.' + targetExt });
         }).on('end', async () => {
             console.log('done');
-            res.setHeader('Content-Disposition', 'attachment; filename=shuffled.zip');
             res.setHeader('Content-Type', 'application/zip');
+            console.log(`[${req.username}] sending shuffled zip`);
             zip.pipe(res).on('progress', (progress) => {
-                console.log(`[${username}] Processed ${progress.totalBytes} bytes`)
+                console.log(`[${req.username}] Processed ${progress.totalBytes} bytes`)
             }).on('finish', () => {
-                fs.unlink(path.resolve(__dirname, '..', uploadDir, username, req.body.file), () => {});
-                console.log(`[${username}] /extract request took ${Date.now()-start} ms`);
+                fs.unlink(path.resolve(__dirname, '..', uploadDir, req.username!, req.body.file), () => {});
+                console.log(`[${req.username}] /extract request took ${Date.now()-start} ms`);
             });
             await zip.finalize();
         })
@@ -116,20 +118,19 @@ app.post('/api/extract', loginCheck, express.json(), async (req, res) => {
 });
 
 app.post('/api/shuffle', loginCheck, express.json(), async (req, res) => {
-    const username = loginManager.check(req.cookies.token)!;
-    if (req.body == null || !Array.isArray(req.body.files) || !['image/jpeg', 'image/png', 'image/webp'].includes(req.body.mimetype) || !Number.isSafeInteger(req.body.batchSize) || req.body.batchSize < 1) {
+    if (req.body == null || !req.username || !Array.isArray(req.body.files) || !['image/jpeg', 'image/png', 'image/webp'].includes(req.body.mimetype) || !Number.isSafeInteger(req.body.batchSize) || req.body.batchSize < 1) {
         res.sendStatus(400);
         return;
     }
     for (const file of req.body.files) {
         if (typeof file != 'string' ||
-            !fs.existsSync(path.resolve(__dirname, '..', uploadDir, username, file)) ||
-            !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, username, file)))?.mime.startsWith('image')) {
+            !fs.existsSync(path.resolve(__dirname, '..', uploadDir, req.username, file)) ||
+            !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, req.username, file)))?.mime.startsWith('image')) {
         res.sendStatus(400);
         return;
         }
     }
-    console.log(`[${username}] /shuffle request`);
+    console.log(`[${req.username}] /shuffle request`);
     try {
         const start = Date.now();
         const targetExt = mime.getExtension(req.body.mimetype)!;
@@ -140,27 +141,26 @@ app.post('/api/shuffle', loginCheck, express.json(), async (req, res) => {
             if (mime.getType(file.filename) != req.body.mimetype) {
                 await new Promise((resolve, reject) => {
                     let buf: Buffer[] = [];
-                    ffmpeg(path.resolve(__dirname, '..', uploadDir, username, file.filename)).videoCodec(targetCodec).format('image2').pipe().on('data', data => {
+                    ffmpeg(path.resolve(__dirname, '..', uploadDir, req.username!, file.filename)).videoCodec(targetCodec).format('image2').pipe().on('data', data => {
                         buf.push(data);
                     }).on('end', () => {
                         zip.append(Buffer.concat(buf), { name: path.join('task' + (file.task + 1), file.targetFilename) });
-                        console.log(`[${username}] zipped file ${fileIndex % req.body.batchSize} of task ${Number(file.task)+1}`);
+                        console.log(`[${req.username}] zipped file ${fileIndex % req.body.batchSize} of task ${Number(file.task)+1}`);
                         resolve(true);
                     });
                 });
             } else {
-                zip.append(fs.createReadStream(path.resolve(__dirname, '..', uploadDir, username, file.filename)), { name: path.join('task' + (file.task + 1), file.targetFilename) });
-                console.log(`[${username}] zipped file ${fileIndex % req.body.batchSize} of task ${Number(file.task)+1}`);
+                zip.append(fs.createReadStream(path.resolve(__dirname, '..', uploadDir, req.username!, file.filename)), { name: path.join('task' + (file.task + 1), file.targetFilename) });
+                console.log(`[${req.username}] zipped file ${fileIndex % req.body.batchSize} of task ${Number(file.task)+1}`);
             }
         });
-        res.setHeader('Content-Disposition', 'attachment; filename=shuffled.zip');
         res.setHeader('Content-Type', 'application/zip');
-        console.log(`[${username}] sending shuffled.zip`)
+        console.log(`[${req.username}] sending shuffled zip`);
         zip.pipe(res).on('progress', (progress) => {
-            console.log(`[${username}] Processed ${progress.totalBytes} bytes`)
+            console.log(`[${req.username}] Processed ${progress.totalBytes} bytes`)
         }).on('finish', () => {
-            for (const file of files) fs.unlink(path.resolve(__dirname, '..', uploadDir, username, file.filename), () => {});
-            console.log(`[${username}] /shuffle request took ${Date.now()-start} ms`);
+            for (const file of files) fs.unlink(path.resolve(__dirname, '..', uploadDir, req.username!, file.filename), () => {});
+            console.log(`[${req.username}] /shuffle request took ${Date.now()-start} ms`);
         });
         await zip.finalize();
     } catch (e) {
@@ -177,16 +177,6 @@ const shuffleArray = (arr: any[]) => {
     return arr;
 }
 
-/**Make it easier to work with shuffle*/
-interface TaskFile {
-    /**Which task this file is part of */
-    task: number
-    /**filename */
-    filename: string
-    /**target filename */
-    targetFilename: string
-}
-
 const indexDir = path.resolve(__dirname, '../../client/dist/index.html');
 app.use(express.static(path.resolve(__dirname, '../../client/dist')));
 app.get(/^(^[^.\n]+\.?)+(.*(html){1})?$/, (req, res) => {
@@ -198,3 +188,21 @@ app.get('*', (req, res) => {
     if (req.accepts('html')) res.sendFile(indexDir);
     else res.sendStatus(404);
 });
+
+declare global {
+    namespace Express {
+        interface Request {
+            username?: string
+        }
+    }
+}
+
+/**Make it easier to work with shuffle*/
+interface TaskFile {
+    /**Which task this file is part of */
+    task: number
+    /**filename */
+    filename: string
+    /**target filename */
+    targetFilename: string
+}

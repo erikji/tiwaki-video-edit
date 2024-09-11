@@ -28,6 +28,9 @@ const percentage = ref<number | undefined>();
 
 const ffmpeg = new FFmpeg();
 const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+ffmpeg.on('log', ({ type, message }) => {
+    console.log(type, message);
+});
 
 const trim = async () => {
     try {

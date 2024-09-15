@@ -9,7 +9,7 @@ export function downloadBlob(data: Blob, filename?: string) {
     a.remove();
 }
 
-export async function upload(files: FileList, percentageRef: Ref<number | undefined>) {
+export async function upload(files: FileList, percentageRef?: Ref<number | undefined>) {
     const requests: FormData[] = [];
     const requestSize = 50;
     for (const file of files) {
@@ -19,7 +19,7 @@ export async function upload(files: FileList, percentageRef: Ref<number | undefi
     }
     console.log(requests);
     return new PromisePool(requests).withConcurrency(10).onTaskFinished((request, pool) => {
-        percentageRef.value = pool.processedPercentage();
+        if (percentageRef) percentageRef.value = pool.processedPercentage();
     }).process(async (request) => {
         return await fetch('api/upload', {
             method: 'POST',

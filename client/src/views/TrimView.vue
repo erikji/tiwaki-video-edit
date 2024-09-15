@@ -4,9 +4,10 @@ import { downloadBlob } from '@/scripts/FileManager';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { toBlobURL, fetchFile } from '@ffmpeg/util';
 import { ref } from 'vue';
+import { upload } from '@/scripts/FileManager';
 
 const stage = ref<HTMLDivElement>();
-const upload = ref<HTMLInputElement>();
+const trimUpload = ref<HTMLInputElement>();
 const videoSource = ref<HTMLVideoElement>();
 const videoURL = ref('');
 const videoType = ref('');
@@ -37,7 +38,7 @@ const trim = async () => {
         status.value = '';
         error.value = '';
         percentage.value = undefined;
-        if (!upload.value || !upload.value.files) return;
+        if (!trimUpload.value || !trimUpload.value.files) return;
         if (!ffmpeg.loaded) {
             await ffmpeg.load({
                 coreURL: await toBlobURL(`${ffmpegBaseURL}/ffmpeg-core.js`, 'text/javascript'),
@@ -45,7 +46,7 @@ const trim = async () => {
                 // workerURL: await toBlobURL(`${ffmpegBaseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
             });
         }
-        const file = upload.value!.files![0];
+        const file = trimUpload.value!.files![0];
         const inputExt = file.name.split('.').slice(-1).join('.');
         const outputFilename = file.name.split('.').slice(0, -1).join('.').concat('_trimmed.', inputExt);
         await ffmpeg.writeFile(file.name, await fetchFile(file));
@@ -65,6 +66,44 @@ const trim = async () => {
         status.value = 'Downloading';
         downloadBlob(new Blob([await ffmpeg.readFile(outputFilename)]), outputFilename);
         status.value = '';
+    } catch (e) {
+        console.error(e);
+        if (typeof e == 'string') {
+            error.value = e;
+        } else if (e instanceof Error) {
+            error.value = e.message;
+        }
+    }
+}
+
+const trimServer = async () => {
+    try {
+        status.value = '';
+        error.value = '';
+        percentage.value = undefined;
+        if (!trimUpload.value || !trimUpload.value.files) throw 'No files uploaded';
+        status.value = 'Uploading file';
+        const uploadResArray = await upload(trimUpload.value!.files!, percentage);
+        percentage.value = undefined;
+        status.value = 'Trimming';
+        const res = await fetch('api/trim', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                file: trimUpload.value.files[0].name,
+                start: trimStart.value,
+                end: trimEnd.value
+            })
+        });
+        if (!res.ok) {
+            throw 'Trim error: ' + res.status + ' ' + res.statusText;
+        }
+        status.value = 'Downloading';
+        downloadBlob(await res.blob(), 'trimmed.zip');
+        status.value = '';
+        trimUpload.value.files = null;
     } catch (e) {
         console.error(e);
         if (typeof e == 'string') {
@@ -121,9 +160,9 @@ const loadMetadata = () => {
 
 const handleUpload = async () => {
     try {
-        if (!upload.value || !upload.value.files) throw 'No files uploaded';
-        videoURL.value = URL.createObjectURL(upload.value.files[0]);
-        videoType.value = upload.value.files[0].type;
+        if (!trimUpload.value || !trimUpload.value.files) throw 'No files uploaded';
+        videoURL.value = URL.createObjectURL(trimUpload.value.files[0]);
+        videoType.value = trimUpload.value.files[0].type;
     } catch (e) {
         console.error(e);
         if (typeof e == 'string') {
@@ -138,7 +177,7 @@ const handleUpload = async () => {
 <template>
     <div class="centered">
         <div class="column">
-            <input type="file" @change=handleUpload ref="upload" accept="video/*">
+            <input type="file" @change=handleUpload ref="trimUpload" accept="video/*">
             <div class="centered row">
                 <div class="stage" ref="stage" @wheel=scrollZoom @mousedown="mouseDown = true" @mouseup ="mouseDown = false" @mouseleave="mouseDown = false" @mousemove="dragPan">
                     <video disablePictureInPicture muted ref="videoSource" :src="videoURL" :type="videoType" @loadedmetadata=loadMetadata 
@@ -160,7 +199,8 @@ const handleUpload = async () => {
                         <button @click="() => trimEnd = Math.ceil(videoTime)">Set to now</button>
                         <button @click="() => trimEnd = -1">Set to end</button>
                     </div>
-                    <div class="centered row"><button @click="trim" :disabled="videoLength <= 0">TRIM</button></div>
+                    <div class="centered row"><button @click=trimServer :disabled="videoLength <= 0">TRIM</button></div>
+                    <ProcessStatus :status :error :percentage></ProcessStatus>
                 </div>
             </div>
             <div class="row videoControls">
@@ -190,7 +230,6 @@ const handleUpload = async () => {
                     videoY = 0;
                 }"><img src="../assets/zoom.svg"></button>
             </div>
-            <ProcessStatus :status :error :percentage></ProcessStatus>
             <div class="instructions">
                 Instructions:<br>
                 1. Upload a video<br>

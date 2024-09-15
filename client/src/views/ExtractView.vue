@@ -35,6 +35,7 @@ const extract = async () => {
         for (const uploadRes of uploadResArray.results) {
             if (!uploadRes.ok) throw 'Upload error: ' + uploadRes.status + ' ' + uploadRes.statusText;
         }
+        status.value = 'Extracting';
         const res = await fetch('api/extract', {
             method: 'POST',
             headers: {

@@ -83,6 +83,34 @@ app.post('/api/upload', loginCheck, upload.any(), (req, res) => {
     res.sendStatus(201);
 });
 
+app.post('/api/trim', loginCheck, express.json(), async (req, res) => {
+    if (req.body == null || typeof req.body.file != 'string' || !req.username || !fs.existsSync(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)) || !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)))?.mime.startsWith('video') || typeof req.body.start != 'number' || typeof req.body.end != 'number') {
+        res.sendStatus(400);
+        return;
+    }
+    console.log(`[${req.username}] /trim request`);
+    try {
+        const start = Date.now();
+        const zip = archiver('zip');
+        const outputFilename = req.body.file.split('.').slice(0, -1).join('.') + Date.now() + '.mp4';
+        ffmpeg(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)).outputOptions(['-ss', req.body.start, '-to', req.body.end]).output(path.resolve(__dirname, '..', uploadDir, req.username,outputFilename)).on('end', async () => {
+            res.setHeader('Content-Type', 'application/zip');
+            console.log(`[${req.username}] sending shuffled zip`);
+            zip.file(path.resolve(__dirname, '..', uploadDir, req.username!, outputFilename), { name: outputFilename }).pipe(res).on('progress', (progress) => {
+                console.log(`[${req.username}] Processed ${progress.totalBytes} bytes`)
+            }).on('finish', () => {
+                fs.unlink(path.resolve(__dirname, '..', uploadDir, req.username!, req.body.file), () => {});
+                console.log(`[${req.username}] /trim request took ${Date.now()-start} ms`);
+            });
+            await zip.finalize();
+        }).run();
+        console.log('hello');
+    } catch (e) {
+        console.error(e);
+        res.sendStatus(500);
+    }
+});
+
 app.post('/api/extract', loginCheck, express.json(), async (req, res) => {
     if (req.body == null || typeof req.body.file != 'string' || !req.username || !fs.existsSync(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)) || !(await fileTypeFromFile(path.resolve(__dirname, '..', uploadDir, req.username, req.body.file)))?.mime.startsWith('video') || !['image/jpeg', 'image/png', 'image/webp'].includes(req.body.mimetype) || typeof req.body.fps != 'number' || req.body.fps <= 0) {
         res.sendStatus(400);
@@ -100,7 +128,6 @@ app.post('/api/extract', loginCheck, express.json(), async (req, res) => {
             index++;
             zip.append(data, { name: 'img' + index + '.' + targetExt });
         }).on('end', async () => {
-            console.log('done');
             res.setHeader('Content-Type', 'application/zip');
             console.log(`[${req.username}] sending shuffled zip`);
             zip.pipe(res).on('progress', (progress) => {

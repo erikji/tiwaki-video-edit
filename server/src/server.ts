@@ -100,6 +100,7 @@ app.post('/api/trim', loginCheck, express.json(), async (req, res) => {
                 console.log(`[${req.username}] Processed ${progress.totalBytes} bytes`)
             }).on('finish', () => {
                 fs.unlink(path.resolve(__dirname, '..', uploadDir, req.username!, req.body.file), () => {});
+                fs.unlink(path.resolve(__dirname, '..', uploadDir, req.username!, outputFilename), () => {});
                 console.log(`[${req.username}] /trim request took ${Date.now()-start} ms`);
             });
             await zip.finalize();
